@@ -17,7 +17,9 @@ func FindStringSubmatchMap(re *regexp.Regexp, s string) map[string]string {
 		if i == 0 || name == "" {
 			continue
 		}
-		captures[name] = match[i]
+		if match[i] != "" {
+			captures[name] = match[i]
+		}
 	}
 	return captures
 }

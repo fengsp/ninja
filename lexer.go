@@ -59,32 +59,32 @@ const (
 )
 
 var operators = map[string]string{
-	"+":  TOKEN_ADD,
-	"-":  TOKEN_SUB,
-	"/":  TOKEN_DIV,
-	"//": TOKEN_FLOORDIV,
-	"*":  TOKEN_MUL,
-	"%%":  TOKEN_MOD,
-	"**": TOKEN_POW,
-	"~":  TOKEN_TILDE,
-	"[":  TOKEN_LBRACKET,
-	"]":  TOKEN_RBRACKET,
-	"(":  TOKEN_LPAREN,
-	")":  TOKEN_RPAREN,
-	"{":  TOKEN_LBRACE,
-	"}":  TOKEN_RBRACE,
-	"==": TOKEN_EQ,
-	"!=": TOKEN_NE,
-	">":  TOKEN_GT,
-	">=": TOKEN_GTEQ,
-	"<":  TOKEN_LT,
-	"<=": TOKEN_LTEQ,
-	"=":  TOKEN_ASSIGN,
-	".":  TOKEN_DOT,
-	":":  TOKEN_COLON,
-	"|":  TOKEN_PIPE,
-	",":  TOKEN_COMMA,
-	";":  TOKEN_SEMICOLON,
+	`\+`:   TOKEN_ADD,
+	`\-`:   TOKEN_SUB,
+	`\/`:   TOKEN_DIV,
+	`\/\/`: TOKEN_FLOORDIV,
+	`\*`:   TOKEN_MUL,
+	`\%`:   TOKEN_MOD,
+	`\*\*`: TOKEN_POW,
+	`\~`:   TOKEN_TILDE,
+	`\[`:   TOKEN_LBRACKET,
+	`\]`:   TOKEN_RBRACKET,
+	`\(`:   TOKEN_LPAREN,
+	`\)`:   TOKEN_RPAREN,
+	`\{`:   TOKEN_LBRACE,
+	`\}`:   TOKEN_RBRACE,
+	`\=\=`: TOKEN_EQ,
+	`\!\=`: TOKEN_NE,
+	`\>`:   TOKEN_GT,
+	`\>\=`: TOKEN_GTEQ,
+	`\<`:   TOKEN_LT,
+	`\<\=`: TOKEN_LTEQ,
+	`\=`:   TOKEN_ASSIGN,
+	`\.`:   TOKEN_DOT,
+	`\:`:   TOKEN_COLON,
+	`\|`:   TOKEN_PIPE,
+	`\,`:   TOKEN_COMMA,
+	`\;`:   TOKEN_SEMICOLON,
 }
 
 func compile(x string) *regexp.Regexp {
@@ -115,16 +115,16 @@ type Lexer struct {
 func NewLexer() *Lexer {
 	lexer := new(Lexer)
 
-	whitespaceRe, _ := regexp.Compile(`\s+`)
-	floatRe, _ := regexp.Compile(`(?<!\.)\d+\.\d+`)
-	integerRe, _ := regexp.Compile(`\d+`)
-	nameRe, _ := regexp.Compile(`\b[a-zA-Z_][a-zA-Z0-9_]*\b`)
-	stringRe, _ := regexp.Compile(`(?s)('([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")`)
+	whitespaceRe, _ := regexp.Compile(`^\s+`)
+	floatRe, _ := regexp.Compile(`^\d+\.\d+`)
+	integerRe, _ := regexp.Compile(`^\d+`)
+	nameRe, _ := regexp.Compile(`^\b[a-zA-Z_][a-zA-Z0-9_]*\b`)
+	stringRe, _ := regexp.Compile(`(?s)^('([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")`)
 	keyArray := make([]string, 0)
 	for k, _ := range operators {
 		keyArray = append(keyArray, k)
 	}
-	operatorRe, _ := regexp.Compile(fmt.Sprintf("(%s)", strings.Join(keyArray, "|")))
+	operatorRe, _ := regexp.Compile(fmt.Sprintf("^(%s)", strings.Join(keyArray, "|")))
 
 	tagRules := []*StateToken{
 		&StateToken{whitespaceRe, []string{TOKEN_WHITESPACE}, "nil"},
@@ -135,9 +135,9 @@ func NewLexer() *Lexer {
 		&StateToken{operatorRe, []string{TOKEN_OPERATOR}, "nil"},
 	}
 
-	lstripRe := `^[ \t]*`
-	noLstripRe := `+`
-	blockPrefixRe := fmt.Sprintf(`%s{%%(?!%s)|{%%\+?`, lstripRe, noLstripRe)
+	//lstripRe := `^[ \t]*`
+	//noLstripRe := `+`
+	//blockPrefixRe := fmt.Sprintf(`%s{%|{%\+?`, lstripRe)
 
 	lexer.rules = make(map[string][]*StateToken)
 
@@ -147,12 +147,11 @@ func NewLexer() *Lexer {
 		"variable": "{{",
 	}
 	regexArray := []string{}
-	regexArray = append(regexArray, fmt.Sprintf(`(?P<raw_begin>(?:\s*{%%\-|%s)\s*raw\s*(?:\-%%}\s*|%%}))`, blockPrefixRe))
+	regexArray = append(regexArray, `(?P<raw_begin>(?:{%)\s*raw\s*(?:%}))`)
 	for n, r := range rootTagRules {
-		regex := fmt.Sprintf(`(?P<%s_begin>\s*%s\-)`, n, r)
+		regex := fmt.Sprintf(`(?P<%s_begin>%s)`, n, r)
 		regexArray = append(regexArray, regex)
 	}
-    fmt.Println(fmt.Sprintf(`(.*?)(?:%s)`, strings.Join(regexArray, `|`)))
 	lexer.rules["root"] = []*StateToken{
 		&StateToken{
 			compile(fmt.Sprintf(`(.*?)(?:%s)`, strings.Join(regexArray, `|`))),
@@ -168,7 +167,7 @@ func NewLexer() *Lexer {
 
 	lexer.rules[TOKEN_COMMENT_BEGIN] = []*StateToken{
 		&StateToken{
-			compile(`(.*?)((?:\-#}\s*|#}))`),
+			compile(`(.*?)((?:#}))`),
 			[]string{TOKEN_COMMENT, TOKEN_COMMENT_END},
 			"#pop",
 		},
@@ -181,7 +180,7 @@ func NewLexer() *Lexer {
 
 	lexer.rules[TOKEN_BLOCK_BEGIN] = append([]*StateToken{
 		&StateToken{
-			compile(`(?:\-%%}\s*|%%})`),
+			compile(`(?:%})`),
 			[]string{TOKEN_BLOCK_END},
 			"#pop",
 		},
@@ -189,7 +188,7 @@ func NewLexer() *Lexer {
 
 	lexer.rules[TOKEN_VARIABLE_BEGIN] = append([]*StateToken{
 		&StateToken{
-			compile(`\-}}\s*|}}`),
+			compile(`}}`),
 			[]string{TOKEN_VARIABLE_END},
 			"#pop",
 		},
@@ -197,7 +196,7 @@ func NewLexer() *Lexer {
 
 	lexer.rules[TOKEN_RAW_BEGIN] = []*StateToken{
 		&StateToken{
-			compile(fmt.Sprintf(`(.*?)((?:\s*{%%\-|%s)\s*endraw\s*(?:\-%%}\s*|%%}))`, blockPrefixRe)),
+			compile(`(.*?)((?:{%)\s*endraw\s*(?:%}))`),
 			[]string{TOKEN_DATA, TOKEN_RAW_END},
 			"#pop",
 		},
@@ -218,20 +217,24 @@ func NewLexer() *Lexer {
 
 	lexer.rules[TOKEN_LINECOMMENT_BEGIN] = []*StateToken{
 		&StateToken{
-			compile(`(.*?)()(?=\n|$)`),
+			compile(`(.*?)()(?:\n|$)`),
 			[]string{TOKEN_LINECOMMENT, TOKEN_LINECOMMENT_END},
 			"#pop",
 		},
 	}
 
-    return lexer
+	return lexer
 }
 
 func (lexer *Lexer) tokeniter(source string) chan *Token {
 	c := make(chan *Token)
 
 	go func() {
-		//lines := strings.Split(source, "\n")
+		lines := strings.Split(source, "\n")
+		if lines[len(lines)-1] == "" {
+			lines = lines[0 : len(lines)-1]
+		}
+		source = strings.Join(lines, "\n")
 		pos := 0
 		lineno := 1
 		stack := []string{"root"}
@@ -246,7 +249,7 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 			breaked := false
 			for _, stateToken := range stateTokens {
 				regex, tokens, newState := stateToken.regex, stateToken.tokens, stateToken.newState
-                m := regex.MatchString(source)
+				m := regex.MatchString(source)
 				index := regex.FindStringIndex(source)
 				if m == false {
 					continue
@@ -266,7 +269,9 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 							}
 						} else {
 							data := regex.FindStringSubmatch(source)[idx+1]
-							c <- &Token{lineno, token, data}
+							if data != "" || (token != TOKEN_WHITESPACE && token != TOKEN_DATA && token != TOKEN_COMMENT && token != TOKEN_LINECOMMENT) {
+								c <- &Token{lineno, token, data}
+							}
 							lineno += strings.Count(data, "\n")
 						}
 					}
@@ -284,7 +289,9 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 							balancingStack = balancingStack[:len(balancingStack)-1]
 						}
 					}
-					c <- &Token{lineno, token, data}
+					if data != "" || (token != TOKEN_WHITESPACE && token != TOKEN_DATA && token != TOKEN_COMMENT && token != TOKEN_LINECOMMENT) {
+						c <- &Token{lineno, token, data}
+					}
 					lineno += strings.Count(data, "\n")
 				}
 
@@ -323,5 +330,5 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 
 func (lexer *Lexer) tokenize(source string) chan *Token {
 	stream := lexer.tokeniter(source)
-    return stream
+	return stream
 }

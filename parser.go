@@ -2,7 +2,7 @@ package ninja
 
 type Parser struct {
 	source string
-    lexer *Lexer
+	lexer  *Lexer
 }
 
 func NewParser(source string) *Parser {
@@ -17,10 +17,10 @@ func (parser *Parser) tokenize() chan *Token {
 }
 
 func (parser *Parser) subParse() {
-    
+
 }
 
 // Parse the template into a node
 func (parser *Parser) parse() {
-	
+
 }
