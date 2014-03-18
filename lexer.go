@@ -58,7 +58,7 @@ const (
 	TOKEN_EOF                 = "eof"
 )
 
-var operators = map[string]string{
+var operators_map = map[string]string{
 	`\+`:   TOKEN_ADD,
 	`\-`:   TOKEN_SUB,
 	`\/`:   TOKEN_DIV,
@@ -87,9 +87,28 @@ var operators = map[string]string{
 	`\;`:   TOKEN_SEMICOLON,
 }
 
+var operatorsArray = []string{`\/\/`, `\*\*`, `\=\=`, `\!\=`, `\>\=`, `\<\=`, `\+`, `\-`, `\/`, `\*`, `\%`, `\~`, `\[`, `\]`, `\(`, `\)`, `\{`, `\}`, `\>`, `\<`, `\=`, `\.`, `\:`, `\|`, `\,`, `\;`}
+
+var ignoredTokens = map[string]bool{
+	TOKEN_COMMENT_BEGIN:     true,
+	TOKEN_COMMENT:           true,
+	TOKEN_COMMENT_END:       true,
+	TOKEN_WHITESPACE:        true,
+	TOKEN_LINECOMMENT_BEGIN: true,
+	TOKEN_LINECOMMENT_END:   true,
+	TOKEN_LINECOMMENT:       true,
+}
+
+var ignoreIfEmpty = map[string]bool{
+	TOKEN_WHITESPACE:  true,
+	TOKEN_DATA:        true,
+	TOKEN_COMMENT:     true,
+	TOKEN_LINECOMMENT: true,
+}
+
 func compile(x string) *regexp.Regexp {
 	x = `(?ms)^` + x
-	r, _ := regexp.Compile(x)
+	r := regexp.MustCompile(x)
 	return r
 }
 
@@ -115,16 +134,12 @@ type Lexer struct {
 func NewLexer() *Lexer {
 	lexer := new(Lexer)
 
-	whitespaceRe, _ := regexp.Compile(`^\s+`)
-	floatRe, _ := regexp.Compile(`^\d+\.\d+`)
-	integerRe, _ := regexp.Compile(`^\d+`)
-	nameRe, _ := regexp.Compile(`^\b[a-zA-Z_][a-zA-Z0-9_]*\b`)
-	stringRe, _ := regexp.Compile(`(?s)^('([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")`)
-	keyArray := make([]string, 0)
-	for k, _ := range operators {
-		keyArray = append(keyArray, k)
-	}
-	operatorRe, _ := regexp.Compile(fmt.Sprintf("^(%s)", strings.Join(keyArray, "|")))
+	whitespaceRe := regexp.MustCompile(`^\s+`)
+	floatRe := regexp.MustCompile(`^\d+\.\d+`)
+	integerRe := regexp.MustCompile(`^\d+`)
+	nameRe := regexp.MustCompile(`^\b[a-zA-Z_][a-zA-Z0-9_]*\b`)
+	stringRe := regexp.MustCompile(`(?s)^('([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")`)
+	operatorRe := regexp.MustCompile(fmt.Sprintf("^(%s)", strings.Join(operatorsArray, "|")))
 
 	tagRules := []*StateToken{
 		&StateToken{whitespaceRe, []string{TOKEN_WHITESPACE}, "nil"},
@@ -173,7 +188,7 @@ func NewLexer() *Lexer {
 		},
 		&StateToken{
 			compile("(.)"),
-			[]string{"Failure"},
+			[]string{"Failure: Missing end of comment tag"},
 			"nil",
 		},
 	}
@@ -202,7 +217,7 @@ func NewLexer() *Lexer {
 		},
 		&StateToken{
 			compile("(.)"),
-			[]string{"Failure"},
+			[]string{"Failure: Missing end of raw directive"},
 			"nil",
 		},
 	}
@@ -262,6 +277,9 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 					for idx, token := range tokens {
 						if token == "#bygroup" {
 							subMap := FindStringSubmatchMap(regex, source)
+							if len(subMap) <= 0 {
+								panic("Can't resolve token, no group matched")
+							}
 							for key, value := range subMap {
 								c <- &Token{lineno, key, value}
 								lineno += strings.Count(value, "\n")
@@ -269,7 +287,7 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 							}
 						} else {
 							data := regex.FindStringSubmatch(source)[idx+1]
-							if data != "" || (token != TOKEN_WHITESPACE && token != TOKEN_DATA && token != TOKEN_COMMENT && token != TOKEN_LINECOMMENT) {
+							if data != "" || !ignoreIfEmpty[token] {
 								c <- &Token{lineno, token, data}
 							}
 							lineno += strings.Count(data, "\n")
@@ -277,7 +295,10 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 					}
 				} else {
 					token := tokens[0]
-					data := regex.FindStringSubmatch(source)[0]
+					if strings.HasPrefix(token, "Failure") {
+						panic(token)
+					}
+					data := regex.FindString(source)
 					if token == "operator" {
 						if data == "{" {
 							balancingStack = append(balancingStack, "}")
@@ -286,10 +307,17 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 						} else if data == "[" {
 							balancingStack = append(balancingStack, "]")
 						} else if data == "}" || data == ")" || data == "]" {
+							if len(balancingStack) <= 0 {
+								panic("unexpected '" + data + "'")
+							}
+							expectedOp := balancingStack[len(balancingStack)-1]
+							if expectedOp != data {
+								panic(fmt.Sprintf("unexpected '%s', expected '%s'", data, expectedOp))
+							}
 							balancingStack = balancingStack[:len(balancingStack)-1]
 						}
 					}
-					if data != "" || (token != TOKEN_WHITESPACE && token != TOKEN_DATA && token != TOKEN_COMMENT && token != TOKEN_LINECOMMENT) {
+					if data != "" || !ignoreIfEmpty[token] {
 						c <- &Token{lineno, token, data}
 					}
 					lineno += strings.Count(data, "\n")
@@ -302,6 +330,9 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 						stack = stack[:len(stack)-1]
 					} else if newState == "#bygroup" {
 						subMap := FindStringSubmatchMap(regex, source)
+						if len(subMap) <= 0 {
+							panic("Can't resolve new state, no group matched")
+						}
 						for key, _ := range subMap {
 							stack = append(stack, key)
 							break
@@ -310,6 +341,8 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 						stack = append(stack, newState)
 					}
 					stateTokens = lexer.rules[stack[len(stack)-1]]
+				} else if pos2 == pos {
+					panic("empty string yielded and without stack change")
 				}
 
 				pos = pos2
@@ -318,8 +351,10 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 				break
 			}
 			if !breaked {
-				break
-				//panic("weird")
+				if len(source) <= 0 {
+					break
+				}
+				panic(fmt.Sprintf("unexpected char %s at %d", source[0], lineno))
 			}
 		}
 		close(c)
