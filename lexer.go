@@ -3,6 +3,7 @@ package ninja
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -58,36 +59,46 @@ const (
 	TOKEN_EOF                 = "eof"
 )
 
-var operators_map = map[string]string{
-	`\+`:   TOKEN_ADD,
-	`\-`:   TOKEN_SUB,
-	`\/`:   TOKEN_DIV,
-	`\/\/`: TOKEN_FLOORDIV,
-	`\*`:   TOKEN_MUL,
-	`\%`:   TOKEN_MOD,
-	`\*\*`: TOKEN_POW,
-	`\~`:   TOKEN_TILDE,
-	`\[`:   TOKEN_LBRACKET,
-	`\]`:   TOKEN_RBRACKET,
-	`\(`:   TOKEN_LPAREN,
-	`\)`:   TOKEN_RPAREN,
-	`\{`:   TOKEN_LBRACE,
-	`\}`:   TOKEN_RBRACE,
-	`\=\=`: TOKEN_EQ,
-	`\!\=`: TOKEN_NE,
-	`\>`:   TOKEN_GT,
-	`\>\=`: TOKEN_GTEQ,
-	`\<`:   TOKEN_LT,
-	`\<\=`: TOKEN_LTEQ,
-	`\=`:   TOKEN_ASSIGN,
-	`\.`:   TOKEN_DOT,
-	`\:`:   TOKEN_COLON,
-	`\|`:   TOKEN_PIPE,
-	`\,`:   TOKEN_COMMA,
-	`\;`:   TOKEN_SEMICOLON,
+var operatorsMap = map[string]string{
+	"+":  TOKEN_ADD,
+	"-":  TOKEN_SUB,
+	"/":  TOKEN_DIV,
+	"//": TOKEN_FLOORDIV,
+	"*":  TOKEN_MUL,
+	"%":  TOKEN_MOD,
+	"**": TOKEN_POW,
+	"~":  TOKEN_TILDE,
+	"[":  TOKEN_LBRACKET,
+	"]":  TOKEN_RBRACKET,
+	"(":  TOKEN_LPAREN,
+	")":  TOKEN_RPAREN,
+	"{":  TOKEN_LBRACE,
+	"}":  TOKEN_RBRACE,
+	"==": TOKEN_EQ,
+	"!=": TOKEN_NE,
+	">":  TOKEN_GT,
+	">=": TOKEN_GTEQ,
+	"<":  TOKEN_LT,
+	"<=": TOKEN_LTEQ,
+	"=":  TOKEN_ASSIGN,
+	".":  TOKEN_DOT,
+	":":  TOKEN_COLON,
+	"|":  TOKEN_PIPE,
+	",":  TOKEN_COMMA,
+	";":  TOKEN_SEMICOLON,
 }
 
 var operatorsArray = []string{`\/\/`, `\*\*`, `\=\=`, `\!\=`, `\>\=`, `\<\=`, `\+`, `\-`, `\/`, `\*`, `\%`, `\~`, `\[`, `\]`, `\(`, `\)`, `\{`, `\}`, `\>`, `\<`, `\=`, `\.`, `\:`, `\|`, `\,`, `\;`}
+
+var (
+	whitespaceRe = regexp.MustCompile(`^\s+`)
+	floatRe      = regexp.MustCompile(`^\d+\.\d+`)
+	integerRe    = regexp.MustCompile(`^\d+`)
+	nameRe       = regexp.MustCompile(`^\b[a-zA-Z_][a-zA-Z0-9_]*\b`)
+	stringRe     = regexp.MustCompile(`(?s)^('([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")`)
+	operatorRe   = regexp.MustCompile(fmt.Sprintf("^(%s)", strings.Join(operatorsArray, "|")))
+	newlineRe    = regexp.MustCompile(`(\r\n|\r|\n)`)
+)
 
 var ignoredTokens = map[string]bool{
 	TOKEN_COMMENT_BEGIN:     true,
@@ -115,7 +126,7 @@ func compile(x string) *regexp.Regexp {
 type Token struct {
 	lineno int
 	tp     string
-	value  string
+	value  interface{}
 }
 
 type StateToken struct {
@@ -125,6 +136,8 @@ type StateToken struct {
 }
 
 type TokenStream struct {
+	iter    chan *Token
+	current *Token
 }
 
 type Lexer struct {
@@ -133,13 +146,6 @@ type Lexer struct {
 
 func NewLexer() *Lexer {
 	lexer := new(Lexer)
-
-	whitespaceRe := regexp.MustCompile(`^\s+`)
-	floatRe := regexp.MustCompile(`^\d+\.\d+`)
-	integerRe := regexp.MustCompile(`^\d+`)
-	nameRe := regexp.MustCompile(`^\b[a-zA-Z_][a-zA-Z0-9_]*\b`)
-	stringRe := regexp.MustCompile(`(?s)^('([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")`)
-	operatorRe := regexp.MustCompile(fmt.Sprintf("^(%s)", strings.Join(operatorsArray, "|")))
 
 	tagRules := []*StateToken{
 		&StateToken{whitespaceRe, []string{TOKEN_WHITESPACE}, "nil"},
@@ -363,7 +369,50 @@ func (lexer *Lexer) tokeniter(source string) chan *Token {
 	return c
 }
 
-func (lexer *Lexer) tokenize(source string) chan *Token {
+func (lexer *Lexer) wrap(stream chan *Token) chan *Token {
+	c := make(chan *Token)
+	var wrappedValue interface{}
+
+	go func() {
+		for token := range stream {
+			lineno := token.lineno
+			tokenType := token.tp
+			value := token.value.(string)
+			wrappedValue = token.value
+			if ignoredTokens[tokenType] {
+				continue
+			} else if tokenType == "raw_begin" || tokenType == "raw_end" {
+				continue
+			} else if tokenType == "data" {
+				wrappedValue = newlineRe.ReplaceAllString(value, "\n")
+			} else if tokenType == "keyword" {
+				tokenType = value
+			} else if tokenType == "name" {
+				wrappedValue = string(value)
+			} else if tokenType == "string" {
+				wrappedValue = string(value)
+			} else if tokenType == "integer" {
+				wrappedValue, err := strconv.Atoi(value)
+				if err != nil {
+					panic(err)
+				}
+			} else if tokenType == "float" {
+				wrappedValue, err := strconv.ParseFloat(value, 64)
+				if err != nil {
+					panic(err)
+				}
+			} else if tokenType == "operator" {
+				tokenType = operatorsMap[value]
+			}
+			c <- &Token{lineno, tokenType, wrappedValue}
+		}
+		close(c)
+	}()
+
+	return c
+}
+
+func (lexer *Lexer) tokenize(source string) *TokenStream {
 	stream := lexer.tokeniter(source)
-	return stream
+	return &TokenStream{lexer.wrap(stream), &Token{1, TOKEN_INITIAL, ""}}
 }

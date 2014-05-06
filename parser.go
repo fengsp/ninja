@@ -1,26 +1,38 @@
 package ninja
 
 type Parser struct {
-	source string
-	lexer  *Lexer
+	stream *TokenStream
 }
 
 func NewParser(source string) *Parser {
 	lexer := NewLexer()
-	parser := &Parser{source: source, lexer: lexer}
+	stream := lexer.tokenize(source)
+	parser := &Parser{stream: stream}
 	return parser
 }
 
-func (parser *Parser) tokenize() chan *Token {
-	stream := parser.lexer.tokenize(parser.source)
-	return stream
-}
-
 func (parser *Parser) subParse() {
+	c := parser.tokenize()
 
+	body := []string{}
+	dataBuffer := []interface{}{}
+
+	for token := range c {
+		if token.tp == "data" {
+			append(dataBuffer, TemplateDataNode{token.value, token.lineno, false})
+		} else if token.tp == "variable_begin" {
+			append(dataBuffer, parser.parseTuple())
+		} else if token.tp == "block_begin" {
+			pass
+		} else {
+			panic("internal parsing error")
+		}
+	}
+	return body
 }
 
 // Parse the template into a node
 func (parser *Parser) parse() {
-
+	result := NewTemplateNode(parser.subParse(), 1)
+	return result
 }
