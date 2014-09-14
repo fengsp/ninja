@@ -140,6 +140,17 @@ type TokenStream struct {
 	current *Token
 }
 
+func (stream *TokenStream) next() {
+    rv = stream.current
+    if stream.current.tp != TOKEN_EOF {
+        stream.current, ok <- stream.iter
+        if (!ok) {
+            stream.close()
+        }
+    }
+    return rv
+}
+
 type Lexer struct {
 	rules map[string][]*StateToken
 }
